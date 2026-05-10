@@ -1,0 +1,38 @@
+id: trader-ys-warmup-review
+
+repo_path: /home/sinabro/projects/Trader-YS
+base_branch: main
+branch_prefix: agent/trader-ys-warmup-review
+runs_root: /home/sinabro/hermes-runs
+
+risk_level: critical
+task_type: review
+
+allow_edits: false
+allow_push: false
+allow_draft_pr: false
+
+codex:
+  model: gpt-5.5
+  effort: high
+  sandbox: read-only
+  timeout_minutes: 10
+
+limits:
+  max_context_chars: 60000
+  max_prompt_chars: 80000
+  max_stdout_mb: 20
+  max_stderr_mb: 10
+
+context_files:
+  - AGENTS.md
+
+objective: |
+  Briefly describe the structure of this repository.
+  Do not modify any files.
+
+acceptance_criteria:
+  - No files modified
+  - Brief structural overview output to stdout
+
+test_commands: []
