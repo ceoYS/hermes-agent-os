@@ -8,18 +8,12 @@ Read one task.yaml, validate it, create an isolated Git worktree, build prompt.m
 
 ## v0.1 Local Smoke Tests
 
-Note: `examples/trader-review.yaml` contains a machine-specific sample path.
-If that repository path does not exist on the current machine, create a temporary smoke task or adjust a local-only copy before running validate/dry-run/run.
+Prefer the portable smoke script. It creates a temporary Git repository, task file, and runs root under `/tmp`, then runs the v0.1 non-nested smoke checks.
 
 ```bash
-python3 -m py_compile hermes.py
-python3 hermes.py --help
-python3 hermes.py validate examples/trader-review.yaml
-python3 hermes.py dry-run examples/trader-review.yaml
-python3 hermes.py run examples/trader-review.yaml --no-codex
-python3 hermes.py list
-python3 hermes.py status <latest_run_id>
-python3 hermes.py cleanup --dry-run --older-than 1m
+bash scripts/smoke_v0_1.sh
 ```
 
-Do not use `run --execute` for this smoke test unless you explicitly want to launch a nested Codex session.
+The script uses `python3 hermes.py run ... --no-codex`; it does not launch nested Codex.
+
+`examples/trader-review.yaml` remains a machine-specific sample. If that repository path does not exist on the current machine, use the smoke script above or adjust a local-only copy before running manual validate/dry-run/run commands.
