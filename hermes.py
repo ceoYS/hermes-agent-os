@@ -9,6 +9,7 @@ import getpass
 import json
 import math
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -20,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 
-HERMES_VERSION = "0.1.0"
+HERMES_VERSION = "0.2.0-a"
 SCHEMA_VERSION = 1
 
 EXIT_SUCCESS = 0
@@ -43,6 +44,9 @@ STATUSES = {
     "completed_with_warnings",
     "failed",
 }
+
+PLAN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+PLAN_FILES = ["plan.md", "queue.md", "log.md", "state.json", "morning_brief.md"]
 
 FORBIDDEN_CONTEXT_PATTERNS = [
     ".env",
@@ -700,6 +704,128 @@ def output_paths(run_dir: Path) -> dict[str, str]:
     }
 
 
+def validate_plan_id(plan_id: str) -> str:
+    if not plan_id:
+        raise ValidationError("plan_id must not be empty")
+    if plan_id.strip() != plan_id:
+        raise ValidationError("plan_id must not contain leading or trailing whitespace")
+    if any(separator in plan_id for separator in ["/", "\\"]):
+        raise ValidationError("plan_id must not contain path separators")
+    if any(character.isspace() for character in plan_id):
+        raise ValidationError("plan_id must not contain spaces or whitespace")
+    if ".." in plan_id:
+        raise ValidationError("plan_id must not contain '..'")
+    if not PLAN_ID_RE.fullmatch(plan_id):
+        raise ValidationError("plan_id may only contain letters, numbers, '.', '_', and '-'")
+    return plan_id
+
+
+def hermes_root() -> Path:
+    return (Path.cwd() / ".hermes").resolve()
+
+
+def plan_paths(plan_id: str) -> dict[str, Path]:
+    safe_plan_id = validate_plan_id(plan_id)
+    root = hermes_root()
+    plans_root = (root / "plans").resolve()
+    plan_dir = (plans_root / safe_plan_id).resolve()
+    try:
+        plan_dir.relative_to(plans_root)
+    except ValueError as exc:
+        raise SafetyError(f"plan directory escapes .hermes/plans: {plan_dir}") from exc
+
+    files = {name: (plan_dir / name).resolve() for name in PLAN_FILES}
+    for path in files.values():
+        try:
+            path.relative_to(plan_dir)
+        except ValueError as exc:
+            raise SafetyError(f"plan file escapes plan directory: {path}") from exc
+
+    return {
+        "root": root,
+        "plans_root": plans_root,
+        "plan_dir": plan_dir,
+        "inbox": (root / "inbox.md").resolve(),
+        **files,
+    }
+
+
+def render_plan_md(*, title: str, objective: str) -> str:
+    return "\n".join(
+        [
+            f"# {title}",
+            "",
+            "## Objective",
+            objective,
+            "",
+            "## Constraints",
+            "- No auto push",
+            "- No auto merge",
+            "- No auto deploy",
+            "- Execute at most one future unit at a time",
+            "",
+            "## Non-Goals",
+            "- run-next implementation",
+            "- run-all implementation",
+            "- External agent integration",
+            "",
+            "## Acceptance Criteria",
+            "- Plan scaffold is reviewable before execution",
+            "- Queue units are explicit and ordered",
+            "",
+            "## Ordered Units",
+            "1. unit-001 - Define first unit",
+            "",
+        ]
+    )
+
+
+def render_queue_md() -> str:
+    return "\n".join(
+        [
+            "| id | title | status | dependencies | notes |",
+            "| --- | --- | --- | --- | --- |",
+            "| unit-001 | Define first unit | pending | - | Replace this row |",
+            "",
+        ]
+    )
+
+
+def render_morning_brief_md(*, title: str) -> str:
+    return "\n".join(
+        [
+            f"# Morning Brief: {title}",
+            "",
+            "## Summary",
+            "",
+            "## Pending Decisions",
+            "",
+            "## Next Actions",
+            "",
+        ]
+    )
+
+
+def queue_status_counts(queue_path: Path) -> dict[str, int]:
+    if not queue_path.exists():
+        return {}
+    counts: dict[str, int] = {}
+    for line in read_text(queue_path).splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|") or not stripped.endswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) < 5:
+            continue
+        if cells[0].lower() == "id" or set(cells[2]) <= {"-", " "}:
+            continue
+        status = cells[2].lower()
+        if not status:
+            continue
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
 def initial_state(
     validation: dict[str, Any],
     *,
@@ -1213,6 +1339,89 @@ def status_command(runs_root: Path, run_id: str) -> int:
     return EXIT_SUCCESS
 
 
+def plan_init_command(plan_id: str, *, title: str, objective: str, force: bool) -> int:
+    try:
+        paths = plan_paths(plan_id)
+        root = paths["root"]
+        plans_root = paths["plans_root"]
+        plan_dir = paths["plan_dir"]
+        inbox_path = paths["inbox"]
+
+        if plan_dir.exists() and not plan_dir.is_dir():
+            raise ValidationError(f"plan path exists and is not a directory: {plan_dir}")
+        if plan_dir.exists() and not force:
+            raise ValidationError(f"plan already exists: {plan_id} (use --force to overwrite scaffold files)")
+
+        root.mkdir(parents=True, exist_ok=True)
+        plans_root.mkdir(parents=True, exist_ok=True)
+        if not inbox_path.exists():
+            write_text(inbox_path, "# Hermes Inbox\n\n")
+
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        created_at = now_iso()
+        files = {
+            "plan": str(paths["plan.md"]),
+            "queue": str(paths["queue.md"]),
+            "log": str(paths["log.md"]),
+            "state": str(paths["state.json"]),
+            "morning_brief": str(paths["morning_brief.md"]),
+        }
+        state = {
+            "schema_version": SCHEMA_VERSION,
+            "hermes_version": HERMES_VERSION,
+            "plan_id": plan_id,
+            "title": title,
+            "objective": objective,
+            "status": "created",
+            "created_at": created_at,
+            "updated_at": created_at,
+            "plan_dir": str(plan_dir),
+            "files": files,
+        }
+
+        write_text(paths["plan.md"], render_plan_md(title=title, objective=objective))
+        write_text(paths["queue.md"], render_queue_md())
+        write_text(paths["log.md"], f"# Plan Log\n\n- {created_at} created plan scaffold\n")
+        write_json(paths["state.json"], state)
+        write_text(paths["morning_brief.md"], render_morning_brief_md(title=title))
+    except HermesError as exc:
+        print(f"plan-init failed: {exc}", file=sys.stderr)
+        return exc.exit_code
+
+    print(f"plan_id: {plan_id}")
+    print("status: created")
+    print(f"plan_dir: {paths['plan_dir']}")
+    return EXIT_SUCCESS
+
+
+def plan_status_command(plan_id: str) -> int:
+    try:
+        paths = plan_paths(plan_id)
+        plan_dir = paths["plan_dir"]
+        state_path = paths["state.json"]
+        if not plan_dir.exists():
+            raise ValidationError(f"plan does not exist: {plan_id}")
+        if not state_path.exists():
+            raise ValidationError(f"plan state not found: {state_path}")
+        state = read_json(state_path)
+        counts = queue_status_counts(paths["queue.md"])
+    except HermesError as exc:
+        print(f"plan-status failed: {exc}", file=sys.stderr)
+        return exc.exit_code
+
+    print(f"plan_id: {state.get('plan_id', '')}")
+    print(f"title: {state.get('title', '')}")
+    print(f"status: {state.get('status', '')}")
+    print(f"created_at: {state.get('created_at', '')}")
+    print(f"updated_at: {state.get('updated_at', '')}")
+    print(f"plan_dir: {state.get('plan_dir', plan_dir)}")
+    if counts:
+        print("queue_counts:")
+        for status, count in sorted(counts.items()):
+            print(f"- {status}: {count}")
+    return EXIT_SUCCESS
+
+
 def parse_older_than(value: str) -> timedelta:
     if len(value) < 2:
         raise ValidationError("--older-than must look like 7d, 12h, or 30m")
@@ -1393,6 +1602,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="runs root containing run dirs; defaults to ~/hermes-runs",
     )
 
+    plan_init_parser = subparsers.add_parser("plan-init", help="create a local plan scaffold")
+    plan_init_parser.add_argument("plan_id")
+    plan_init_parser.add_argument("--title", required=True, help="human-readable plan title")
+    plan_init_parser.add_argument("--objective", required=True, help="plan objective")
+    plan_init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite scaffold files inside the exact plan directory",
+    )
+
+    plan_status_parser = subparsers.add_parser("plan-status", help="show a local plan summary")
+    plan_status_parser.add_argument("plan_id")
+
     cleanup_parser = subparsers.add_parser("cleanup", help="remove old Hermes-owned run dirs")
     cleanup_parser.add_argument("--dry-run", action="store_true", help="show what would be removed")
     cleanup_parser.add_argument("--older-than", required=True, help="age threshold such as 7d")
@@ -1420,6 +1642,15 @@ def main(argv: list[str] | None = None) -> int:
         return list_command(Path(args.runs_root), limit=args.limit)
     if args.command == "status":
         return status_command(Path(args.runs_root), args.run_id)
+    if args.command == "plan-init":
+        return plan_init_command(
+            args.plan_id,
+            title=args.title,
+            objective=args.objective,
+            force=args.force,
+        )
+    if args.command == "plan-status":
+        return plan_status_command(args.plan_id)
     if args.command == "cleanup":
         return cleanup_command(
             Path(args.runs_root),
