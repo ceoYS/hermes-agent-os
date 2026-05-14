@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 
-HERMES_VERSION = "0.0.1"
+HERMES_VERSION = "0.1.0"
 SCHEMA_VERSION = 1
 
 EXIT_SUCCESS = 0
@@ -690,6 +690,7 @@ def output_paths(run_dir: Path) -> dict[str, str]:
         "prompt": str(run_dir / "prompt.md"),
         "codex_stdout": str(run_dir / "codex_stdout.log"),
         "codex_stderr": str(run_dir / "codex_stderr.log"),
+        "git_status_raw": str(run_dir / "git_status_raw.txt"),
         "git_status": str(run_dir / "git_status.txt"),
         "git_diff_stat": str(run_dir / "git_diff_stat.txt"),
         "git_diff_patch": str(run_dir / "git_diff.patch"),
@@ -819,6 +820,7 @@ def run_codex(
     max_stdout_bytes = int(require_positive_number(task, "limits.max_stdout_mb") * 1024 * 1024)
     max_stderr_bytes = int(require_positive_number(task, "limits.max_stderr_mb") * 1024 * 1024)
     timeout_seconds = float(require_positive_number(task, "codex.timeout_minutes")) * 60
+    effort_config = f"model_reasoning_effort={json.dumps(require_string(task, 'codex.effort'))}"
     cmd = [
         "codex",
         "exec",
@@ -826,6 +828,8 @@ def run_codex(
         require_string(task, "codex.model"),
         "--sandbox",
         require_string(task, "codex.sandbox"),
+        "-c",
+        effort_config,
         "-",
     ]
     logger.log("RUN " + format_cmd(cmd))
@@ -907,12 +911,13 @@ def collect_git_outputs(
     logger: Logger,
 ) -> None:
     base_commit = validation["base_commit"]
-    run_git_output_to_file(
+    raw_status = run_git_output_to_file(
         worktree_path,
         ["status", "--short"],
-        run_dir / "git_status.txt",
+        run_dir / "git_status_raw.txt",
         logger=logger,
     )
+    write_text(run_dir / "git_status.txt", filter_git_status(raw_status))
     run_git_output_to_file(
         worktree_path,
         ["diff", "--stat"],
@@ -941,6 +946,17 @@ def collect_git_outputs(
     objective = require_string(validation["task"], "objective").lower()
     if commits.strip() and "commit" not in objective:
         state["warnings"].append("commits exist but the task objective did not explicitly require commits")
+
+
+def filter_git_status(raw_status: str) -> str:
+    kept_lines = []
+    for line in raw_status.splitlines():
+        if line[3:] == ".hermes-managed":
+            continue
+        kept_lines.append(line)
+    if not kept_lines:
+        return ""
+    return "\n".join(kept_lines) + "\n"
 
 
 def run_task(task_path: Path, *, execute: bool) -> int:
@@ -1083,6 +1099,117 @@ def dry_run_command(task_path: Path) -> int:
     print(f"prompt size chars: {len(validation['prompt_text'])}")
     print(f"estimated input tokens: {validation['estimated_input_tokens']}")
     print("codex pre-flight would be needed: no")
+    return EXIT_SUCCESS
+
+
+def list_command(runs_root: Path, *, limit: int) -> int:
+    if limit <= 0:
+        print("list failed: --limit must be positive", file=sys.stderr)
+        return EXIT_VALIDATION
+
+    runs_root = runs_root.expanduser()
+    journal_path = runs_root / "journal.jsonl"
+    if not journal_path.exists():
+        print(f"journal not found: {journal_path}")
+        return EXIT_SUCCESS
+
+    rows: list[dict[str, Any]] = []
+    try:
+        with open_text(journal_path, "r") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    rows.append(row)
+    except Exception as exc:
+        print(f"list failed: failed to read {journal_path}: {exc}", file=sys.stderr)
+        return EXIT_VALIDATION
+
+    print(
+        "run_id\ttask_id\tstatus\tduration_seconds\tcodex_exit_code\t"
+        "estimated_input_tokens"
+    )
+    for row in rows[-limit:]:
+        print(
+            "\t".join(
+                str(row.get(key, ""))
+                for key in [
+                    "run_id",
+                    "task_id",
+                    "status",
+                    "duration_seconds",
+                    "codex_exit_code",
+                    "estimated_input_tokens",
+                ]
+            )
+        )
+    return EXIT_SUCCESS
+
+
+def find_run_state(runs_root: Path, run_id: str) -> dict[str, Any]:
+    if not run_id.strip():
+        raise ValidationError("run_id must not be empty")
+
+    direct_state_path = runs_root / run_id / "state.json"
+    if direct_state_path.exists():
+        return read_json(direct_state_path)
+
+    if not runs_root.exists():
+        raise ValidationError(f"runs_root does not exist: {runs_root}")
+    if not runs_root.is_dir():
+        raise ValidationError(f"runs_root is not a directory: {runs_root}")
+
+    for child in sorted(runs_root.iterdir()):
+        if not child.is_dir():
+            continue
+        state_path = child / "state.json"
+        if not state_path.exists():
+            continue
+        try:
+            state = read_json(state_path)
+        except HermesError:
+            continue
+        if state.get("run_id") == run_id:
+            return state
+
+    raise ValidationError(f"run not found under {runs_root}: {run_id}")
+
+
+def status_command(runs_root: Path, run_id: str) -> int:
+    runs_root = runs_root.expanduser()
+    try:
+        state = find_run_state(runs_root, run_id)
+    except HermesError as exc:
+        print(f"status failed: {exc}", file=sys.stderr)
+        return exc.exit_code
+
+    codex = state.get("codex", {})
+    if not isinstance(codex, dict):
+        codex = {}
+    warnings = state.get("warnings", [])
+    errors = state.get("errors", [])
+    outputs = state.get("outputs", {})
+
+    print(f"run_id: {state.get('run_id', '')}")
+    print(f"task_id: {state.get('task_id', '')}")
+    print(f"status: {state.get('status', '')}")
+    print(f"created_at: {state.get('created_at', '')}")
+    print(f"updated_at: {state.get('updated_at', '')}")
+    print(f"repo_path: {state.get('repo_path', '')}")
+    print(f"worktree_path: {state.get('worktree_path', '')}")
+    print(f"base_commit: {state.get('base_commit', '')}")
+    print(f"branch: {state.get('branch', '')}")
+    print(f"codex_exit_code: {codex.get('exit_code', '')}")
+    print(f"codex_timed_out: {codex.get('timed_out', '')}")
+    print(f"codex_estimated_input_tokens: {codex.get('estimated_input_tokens', '')}")
+    print(f"warnings: {len(warnings) if isinstance(warnings, list) else 0}")
+    print(f"errors: {len(errors) if isinstance(errors, list) else 0}")
+    print("outputs:")
+    if isinstance(outputs, dict):
+        for key, value in outputs.items():
+            print(f"- {key}: {value}")
     return EXIT_SUCCESS
 
 
@@ -1250,6 +1377,22 @@ def build_parser() -> argparse.ArgumentParser:
     run_mode.add_argument("--no-codex", action="store_true", help="do not run codex exec")
     run_mode.add_argument("--execute", action="store_true", help="run codex exec")
 
+    list_parser = subparsers.add_parser("list", help="list recent Hermes runs")
+    list_parser.add_argument(
+        "--runs-root",
+        default="~/hermes-runs",
+        help="runs root containing journal.jsonl; defaults to ~/hermes-runs",
+    )
+    list_parser.add_argument("--limit", type=int, default=10, help="number of recent runs to show")
+
+    status_parser = subparsers.add_parser("status", help="show a Hermes run summary")
+    status_parser.add_argument("run_id")
+    status_parser.add_argument(
+        "--runs-root",
+        default="~/hermes-runs",
+        help="runs root containing run dirs; defaults to ~/hermes-runs",
+    )
+
     cleanup_parser = subparsers.add_parser("cleanup", help="remove old Hermes-owned run dirs")
     cleanup_parser.add_argument("--dry-run", action="store_true", help="show what would be removed")
     cleanup_parser.add_argument("--older-than", required=True, help="age threshold such as 7d")
@@ -1273,6 +1416,10 @@ def main(argv: list[str] | None = None) -> int:
         return dry_run_command(Path(args.task_yaml))
     if args.command == "run":
         return run_task(Path(args.task_yaml), execute=args.execute)
+    if args.command == "list":
+        return list_command(Path(args.runs_root), limit=args.limit)
+    if args.command == "status":
+        return status_command(Path(args.runs_root), args.run_id)
     if args.command == "cleanup":
         return cleanup_command(
             Path(args.runs_root),
