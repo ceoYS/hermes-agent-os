@@ -16,12 +16,13 @@ import socket
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 
-HERMES_VERSION = "0.2.0-a"
+HERMES_VERSION = "0.2.0-b"
 SCHEMA_VERSION = 1
 
 EXIT_SUCCESS = 0
@@ -47,6 +48,23 @@ STATUSES = {
 
 PLAN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 PLAN_FILES = ["plan.md", "queue.md", "log.md", "state.json", "morning_brief.md"]
+QUEUE_STATUSES = {
+    "pending",
+    "running",
+    "completed",
+    "needs_work",
+    "failed",
+    "skipped",
+}
+QUEUE_COUNT_ORDER = [
+    "pending",
+    "running",
+    "completed",
+    "needs_work",
+    "failed",
+    "skipped",
+    "unknown",
+]
 
 FORBIDDEN_CONTEXT_PATTERNS = [
     ".env",
@@ -142,6 +160,17 @@ class Logger:
             return
         with open_text(self.path, "a") as handle:
             handle.write(line + "\n")
+
+
+@dataclass
+class QueueUnit:
+    id: str
+    title: str
+    status: str
+    dependencies: str
+    notes: str
+    line_number: int
+    errors: list[str] = field(default_factory=list)
 
 
 def now_local() -> datetime:
@@ -806,24 +835,94 @@ def render_morning_brief_md(*, title: str) -> str:
     )
 
 
-def queue_status_counts(queue_path: Path) -> dict[str, int]:
+def is_queue_header_row(cells: list[str]) -> bool:
+    lowered = [cell.lower() for cell in cells[:5]]
+    return lowered == ["id", "title", "status", "dependencies", "notes"]
+
+
+def is_queue_separator_cell(cell: str) -> bool:
+    return bool(re.fullmatch(r":?-{3,}:?", cell.strip()))
+
+
+def is_queue_separator_row(cells: list[str]) -> bool:
+    if len(cells) < 5:
+        return False
+    return all(is_queue_separator_cell(cell) for cell in cells[:5])
+
+
+def parse_queue_units(queue_path: Path) -> tuple[list[QueueUnit], dict[str, int], list[str]]:
+    units: list[QueueUnit] = []
+    warnings: list[str] = []
+    counts = {status: 0 for status in QUEUE_COUNT_ORDER}
+
     if not queue_path.exists():
-        return {}
-    counts: dict[str, int] = {}
-    for line in read_text(queue_path).splitlines():
+        warnings.append(f"queue file not found: {queue_path}")
+        return units, counts, warnings
+
+    seen_ids: dict[str, int] = {}
+    in_queue_table = False
+    queue_table_closed = False
+    for line_number, line in enumerate(read_text(queue_path).splitlines(), start=1):
         stripped = line.strip()
+        if not stripped:
+            continue
         if not stripped.startswith("|") or not stripped.endswith("|"):
+            if in_queue_table:
+                in_queue_table = False
+                queue_table_closed = True
             continue
+
         cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if queue_table_closed:
+            continue
+        if is_queue_header_row(cells):
+            in_queue_table = True
+            continue
+        if not in_queue_table:
+            continue
+        if is_queue_separator_row(cells):
+            continue
         if len(cells) < 5:
+            warnings.append(
+                f"line {line_number}: malformed queue row has {len(cells)} cells, expected at least 5"
+            )
             continue
-        if cells[0].lower() == "id" or set(cells[2]) <= {"-", " "}:
-            continue
-        status = cells[2].lower()
-        if not status:
-            continue
-        counts[status] = counts.get(status, 0) + 1
-    return counts
+
+        unit_id, title, raw_status, dependencies = cells[:4]
+        notes = " | ".join(cells[4:])
+        unit_errors: list[str] = []
+
+        if not unit_id:
+            unit_errors.append("empty id")
+        elif unit_id in seen_ids:
+            unit_errors.append(f"duplicate id also seen on line {seen_ids[unit_id]}")
+        else:
+            seen_ids[unit_id] = line_number
+
+        normalized_status = raw_status.lower()
+        if not normalized_status:
+            unit_errors.append("empty status")
+            normalized_status = "unknown"
+        elif normalized_status not in QUEUE_STATUSES:
+            unit_errors.append(f"unknown status: {raw_status}")
+            normalized_status = "unknown"
+
+        counts[normalized_status] += 1
+        unit = QueueUnit(
+            id=unit_id,
+            title=title,
+            status=normalized_status,
+            dependencies=dependencies,
+            notes=notes,
+            line_number=line_number,
+            errors=unit_errors,
+        )
+        units.append(unit)
+        for error in unit_errors:
+            label = unit_id if unit_id else "<empty id>"
+            warnings.append(f"line {line_number}: {label}: {error}")
+
+    return units, counts, warnings
 
 
 def initial_state(
@@ -1404,7 +1503,7 @@ def plan_status_command(plan_id: str) -> int:
         if not state_path.exists():
             raise ValidationError(f"plan state not found: {state_path}")
         state = read_json(state_path)
-        counts = queue_status_counts(paths["queue.md"])
+        units, counts, warnings = parse_queue_units(paths["queue.md"])
     except HermesError as exc:
         print(f"plan-status failed: {exc}", file=sys.stderr)
         return exc.exit_code
@@ -1415,10 +1514,32 @@ def plan_status_command(plan_id: str) -> int:
     print(f"created_at: {state.get('created_at', '')}")
     print(f"updated_at: {state.get('updated_at', '')}")
     print(f"plan_dir: {state.get('plan_dir', plan_dir)}")
-    if counts:
-        print("queue_counts:")
-        for status, count in sorted(counts.items()):
-            print(f"- {status}: {count}")
+    print("queue_counts:")
+    for status in QUEUE_COUNT_ORDER:
+        print(f"- {status}: {counts.get(status, 0)}")
+    print("queue_units:")
+    if units:
+        print("line\tid\tstatus\tdependencies\ttitle\tnotes")
+        for unit in units:
+            print(
+                "\t".join(
+                    [
+                        str(unit.line_number),
+                        unit.id,
+                        unit.status,
+                        unit.dependencies,
+                        unit.title,
+                        unit.notes,
+                    ]
+                )
+            )
+    else:
+        print("(none)")
+    print(f"warnings: {len(warnings)}")
+    if warnings:
+        print("warnings_detail:")
+        for warning in warnings:
+            print(f"- {warning}")
     return EXIT_SUCCESS
 
 
