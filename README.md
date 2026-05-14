@@ -28,3 +28,21 @@ python3 hermes.py plan-status trader-d129-docs-only
 ```
 
 Generated `.hermes/` runtime plans are local artifacts and are ignored by Git. Do not commit generated `.hermes/plans/*` directories.
+
+## v0.2-B Queue Parser
+
+`plan-status` now parses `.hermes/plans/<plan_id>/queue.md` and reports queue counts, units, and parser warnings without modifying plan state or executing any queue units.
+
+Supported queue statuses:
+- pending
+- running
+- completed
+- needs_work
+- failed
+- skipped
+
+Smoke test:
+
+```bash
+bash scripts/smoke_v0_2_b_queue_parser.sh
+```
