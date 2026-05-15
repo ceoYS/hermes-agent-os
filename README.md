@@ -175,3 +175,49 @@ That checkpoint is for audit history only; it does not replace the current verdi
 
 Hermes v0.2 still has no automatic queue execution, automatic merge, automatic reviewer,
 model routing, or run-all behavior.
+
+## v0.3-E Minimal State Validator
+
+Hermes ships a read-only `validate-state` command that inspects a single
+`state.json` record and reports PASS or FAIL. It never creates, modifies,
+or transitions state, and it never approves, runs, pushes, merges, or deploys
+anything.
+
+```bash
+python3 hermes.py validate-state <plan_id>
+python3 hermes.py validate-state <plan_id> --state-file <path>
+```
+
+Default input is `.hermes/plans/<plan_id>/state.json`. `--state-file` overrides
+the input path so operators can validate fixtures without touching real plan
+state.
+
+Exit codes:
+- `0`: validation passed
+- `1`: validation failed (one or more rule violations)
+- `2`: usage error, missing file, unreadable file, or invalid JSON
+
+Validation scope:
+- required fields exist (`schema_version`, `plan_id`, `state`, `updated_at`,
+  `updated_by`, `transition_reason`, `history`)
+- `plan_id` in the record matches the CLI argument
+- `state` and `previous_state` are known lifecycle states
+- `previous_state -> state` is on the v0.3-A allowed transition graph
+- forbidden transitions to `running` (for example `archived -> running`,
+  `blocked_by_reviewer -> running`, `completed -> running`) are rejected
+- `updated_at` has an ISO-8601 shape
+- `history` is a list
+- `review_gate_snapshot` is one of `open`, `blocked_by_reviewer`, or `unknown`
+  when present; `unknown` emits a warning and still passes; an unrecognized
+  string fails; `blocked_by_reviewer` combined with `approved_for_manual_run`
+  or `running` fails
+
+The validator does not parse `reviewer_report.md`, `queue.md`, `log.md`, or
+dry-run evidence. It does not enforce the state machine inside `run-next` or
+`plan-status`, and it does not make `.hermes/` a Git-tracked directory.
+
+Smoke test:
+
+```bash
+bash scripts/smoke_v0_3_e_validate_state.sh
+```

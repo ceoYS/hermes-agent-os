@@ -125,6 +125,71 @@ REQUIRED_FIELDS = [
     "acceptance_criteria",
 ]
 
+PLAN_STATE_VALUES = {
+    "draft",
+    "queued",
+    "dry_run_ready",
+    "awaiting_review",
+    "blocked_by_reviewer",
+    "approved_for_manual_run",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    "archived",
+}
+
+PLAN_STATE_ALLOWED_TRANSITIONS = {
+    (None, "draft"),
+    ("draft", "queued"),
+    ("queued", "dry_run_ready"),
+    ("dry_run_ready", "awaiting_review"),
+    ("awaiting_review", "blocked_by_reviewer"),
+    ("awaiting_review", "approved_for_manual_run"),
+    ("blocked_by_reviewer", "awaiting_review"),
+    ("approved_for_manual_run", "running"),
+    ("running", "completed"),
+    ("running", "failed"),
+    ("running", "cancelled"),
+    ("completed", "archived"),
+    ("failed", "archived"),
+    ("cancelled", "archived"),
+}
+
+PLAN_STATE_FORBIDDEN_TRANSITIONS = {
+    ("draft", "running"),
+    ("queued", "running"),
+    ("dry_run_ready", "running"),
+    ("awaiting_review", "running"),
+    ("blocked_by_reviewer", "running"),
+    ("archived", "running"),
+    ("completed", "running"),
+    ("failed", "running"),
+    ("cancelled", "running"),
+}
+
+PLAN_STATE_REQUIRED_FIELDS = [
+    "schema_version",
+    "plan_id",
+    "state",
+    "updated_at",
+    "updated_by",
+    "transition_reason",
+    "history",
+]
+
+REVIEW_GATE_KNOWN_VALUES = {"open", "blocked_by_reviewer", "unknown"}
+REVIEW_GATE_BLOCKING_VALUES = {"blocked_by_reviewer"}
+REVIEW_GATE_WARN_VALUES = {"unknown"}
+
+ISO_8601_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$"
+)
+
+VALIDATE_STATE_EXIT_PASS = 0
+VALIDATE_STATE_EXIT_FAIL = 1
+VALIDATE_STATE_EXIT_USAGE = 2
+
 
 class HermesError(Exception):
     exit_code = EXIT_GENERAL
@@ -1744,6 +1809,181 @@ def plan_status_command(plan_id: str) -> int:
     return EXIT_SUCCESS
 
 
+def _read_state_record(state_file: Path) -> tuple[dict[str, Any] | None, int, str]:
+    try:
+        raw = state_file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None, VALIDATE_STATE_EXIT_USAGE, f"state file not found: {state_file}"
+    except IsADirectoryError:
+        return None, VALIDATE_STATE_EXIT_USAGE, f"state path is a directory: {state_file}"
+    except PermissionError as exc:
+        return None, VALIDATE_STATE_EXIT_USAGE, f"state file unreadable: {state_file}: {exc}"
+    except OSError as exc:
+        return None, VALIDATE_STATE_EXIT_USAGE, f"state file unreadable: {state_file}: {exc}"
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, VALIDATE_STATE_EXIT_USAGE, f"state file is not valid JSON: {state_file}: {exc}"
+    if not isinstance(data, dict):
+        return None, VALIDATE_STATE_EXIT_USAGE, f"state file root must be a JSON object: {state_file}"
+    return data, VALIDATE_STATE_EXIT_PASS, ""
+
+
+def validate_plan_state_record(
+    record: dict[str, Any], *, expected_plan_id: str
+) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    for field_name in PLAN_STATE_REQUIRED_FIELDS:
+        if field_name not in record:
+            errors.append(f"error: field={field_name} reason=missing_required_field")
+
+    plan_id = record.get("plan_id")
+    if "plan_id" in record:
+        if not isinstance(plan_id, str):
+            errors.append(
+                f"error: field=plan_id reason=invalid_type value={type(plan_id).__name__}"
+            )
+        elif plan_id != expected_plan_id:
+            errors.append(
+                f"error: field=plan_id reason=plan_id_mismatch "
+                f"value={plan_id} expected={expected_plan_id}"
+            )
+
+    state_value = record.get("state")
+    state_known = False
+    if "state" in record:
+        if not isinstance(state_value, str):
+            errors.append(
+                f"error: field=state reason=invalid_type value={type(state_value).__name__}"
+            )
+        elif state_value not in PLAN_STATE_VALUES:
+            errors.append(f"error: field=state reason=unknown_state value={state_value}")
+        else:
+            state_known = True
+
+    previous_state = record.get("previous_state", None)
+    previous_state_known = previous_state is None
+    if previous_state is not None:
+        if not isinstance(previous_state, str):
+            errors.append(
+                f"error: field=previous_state reason=invalid_type "
+                f"value={type(previous_state).__name__}"
+            )
+        elif previous_state not in PLAN_STATE_VALUES:
+            errors.append(
+                f"error: field=previous_state reason=unknown_state value={previous_state}"
+            )
+        else:
+            previous_state_known = True
+
+    if state_known and previous_state_known:
+        transition = (previous_state, state_value)
+        if transition in PLAN_STATE_FORBIDDEN_TRANSITIONS:
+            errors.append(
+                f"error: field=previous_state/state reason=forbidden_transition "
+                f"value={previous_state}->{state_value}"
+            )
+        elif transition not in PLAN_STATE_ALLOWED_TRANSITIONS:
+            errors.append(
+                f"error: field=previous_state/state reason=invalid_transition "
+                f"value={previous_state}->{state_value}"
+            )
+
+    updated_at = record.get("updated_at")
+    if "updated_at" in record:
+        if not isinstance(updated_at, str) or not ISO_8601_RE.match(updated_at):
+            errors.append(
+                f"error: field=updated_at reason=invalid_iso8601 value={updated_at!r}"
+            )
+
+    history = record.get("history")
+    if "history" in record and not isinstance(history, list):
+        errors.append(
+            f"error: field=history reason=invalid_type value={type(history).__name__}"
+        )
+
+    if "review_gate_snapshot" in record:
+        gate = record["review_gate_snapshot"]
+        gate_value: Any
+        if isinstance(gate, str):
+            gate_value = gate
+        elif isinstance(gate, dict) and "review_gate" in gate:
+            gate_value = gate.get("review_gate")
+        else:
+            gate_value = gate
+        if gate_value is None:
+            errors.append(
+                "error: field=review_gate_snapshot reason=missing_review_gate value=None"
+            )
+        elif not isinstance(gate_value, str):
+            errors.append(
+                f"error: field=review_gate_snapshot reason=invalid_type "
+                f"value={type(gate_value).__name__}"
+            )
+        elif gate_value not in REVIEW_GATE_KNOWN_VALUES:
+            errors.append(
+                f"error: field=review_gate_snapshot reason=unknown_review_gate "
+                f"value={gate_value}"
+            )
+        else:
+            if gate_value in REVIEW_GATE_WARN_VALUES:
+                warnings.append(
+                    f"warning: field=review_gate_snapshot reason=operator_review_required "
+                    f"value={gate_value}"
+                )
+            if gate_value in REVIEW_GATE_BLOCKING_VALUES and state_known and state_value in {
+                "approved_for_manual_run",
+                "running",
+            }:
+                errors.append(
+                    f"error: field=review_gate_snapshot/state reason=reviewer_blocked "
+                    f"value={gate_value}/{state_value}"
+                )
+
+    return errors, warnings
+
+
+def validate_state_command(plan_id: str, *, state_file: Path | None) -> int:
+    try:
+        safe_plan_id = validate_plan_id(plan_id)
+    except HermesError as exc:
+        print(f"validate-state failed: {exc}", file=sys.stderr)
+        return VALIDATE_STATE_EXIT_USAGE
+
+    if state_file is None:
+        try:
+            paths = plan_paths(safe_plan_id)
+        except HermesError as exc:
+            print(f"validate-state failed: {exc}", file=sys.stderr)
+            return VALIDATE_STATE_EXIT_USAGE
+        target = paths["state.json"]
+    else:
+        target = state_file.expanduser().resolve()
+
+    record, status, message = _read_state_record(target)
+    if record is None:
+        print(f"validate-state failed: {message}", file=sys.stderr)
+        return status
+
+    errors, warnings = validate_plan_state_record(record, expected_plan_id=safe_plan_id)
+
+    verdict = "pass" if not errors else "fail"
+    print(f"state_validation: {verdict}")
+    print(f"plan_id: {safe_plan_id}")
+    print(f"state_file: {target}")
+    print(f"errors: {len(errors)}")
+    print(f"warnings: {len(warnings)}")
+    for entry in errors:
+        print(entry)
+    for entry in warnings:
+        print(entry)
+    print("note: validator is read-only and does not approve, transition, or modify state")
+
+    return VALIDATE_STATE_EXIT_PASS if not errors else VALIDATE_STATE_EXIT_FAIL
+
+
 def run_next_command(plan_id: str, *, dry_run: bool) -> int:
     if not dry_run:
         print("run-next failed: real execution is not implemented in v0.2-C; use --dry-run", file=sys.stderr)
@@ -2003,6 +2243,17 @@ def build_parser() -> argparse.ArgumentParser:
     run_next_parser.add_argument("plan_id")
     run_next_parser.add_argument("--dry-run", action="store_true", help="select without executing a unit")
 
+    validate_state_parser = subparsers.add_parser(
+        "validate-state",
+        help="read-only validate a Hermes plan state.json record",
+    )
+    validate_state_parser.add_argument("plan_id")
+    validate_state_parser.add_argument(
+        "--state-file",
+        default=None,
+        help="explicit path to a state.json file; defaults to .hermes/plans/<plan_id>/state.json",
+    )
+
     cleanup_parser = subparsers.add_parser("cleanup", help="remove old Hermes-owned run dirs")
     cleanup_parser.add_argument("--dry-run", action="store_true", help="show what would be removed")
     cleanup_parser.add_argument("--older-than", required=True, help="age threshold such as 7d")
@@ -2016,9 +2267,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ensure_improvements_file()
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command != "validate-state":
+        ensure_improvements_file()
 
     if args.command == "validate":
         return validate_command(Path(args.task_yaml))
@@ -2041,6 +2294,9 @@ def main(argv: list[str] | None = None) -> int:
         return plan_status_command(args.plan_id)
     if args.command == "run-next":
         return run_next_command(args.plan_id, dry_run=args.dry_run)
+    if args.command == "validate-state":
+        state_file = Path(args.state_file) if args.state_file else None
+        return validate_state_command(args.plan_id, state_file=state_file)
     if args.command == "cleanup":
         return cleanup_command(
             Path(args.runs_root),
