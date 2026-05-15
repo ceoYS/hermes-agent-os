@@ -11,6 +11,7 @@ and [docs/V0_3_ENTRY_CRITERIA.md](docs/V0_3_ENTRY_CRITERIA.md).
 Plan state machine design: see [docs/PLAN_STATE_MACHINE.md](docs/PLAN_STATE_MACHINE.md).
 Plan state record schema design: see [docs/PLAN_STATE_RECORD_SCHEMA.md](docs/PLAN_STATE_RECORD_SCHEMA.md).
 State record validation rules: see [docs/STATE_RECORD_VALIDATION_RULES.md](docs/STATE_RECORD_VALIDATION_RULES.md).
+Minimal state validator plan: see [docs/MINIMAL_STATE_VALIDATOR_PLAN.md](docs/MINIMAL_STATE_VALIDATOR_PLAN.md).
 
 ## v0 Goal
 
