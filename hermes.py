@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 
-HERMES_VERSION = "0.2.0-d"
+HERMES_VERSION = "0.2.0-e"
 SCHEMA_VERSION = 1
 
 EXIT_SUCCESS = 0
@@ -63,6 +63,7 @@ REVIEWER_VERDICTS = {
     "blocked",
 }
 REVIEWER_STOP_VERDICTS = {"needs_work", "blocked"}
+REVIEWER_OPEN_VERDICTS = {"pending", "pass", "pass_with_notes"}
 QUEUE_STATUSES = {
     "pending",
     "running",
@@ -947,6 +948,14 @@ def parse_reviewer_report(report_path: Path) -> ReviewerReport:
     )
 
 
+def reviewer_gate_status(reviewer_report: ReviewerReport) -> str:
+    if reviewer_report.verdict in REVIEWER_STOP_VERDICTS:
+        return "blocked_by_reviewer"
+    if reviewer_report.verdict in REVIEWER_OPEN_VERDICTS:
+        return "open"
+    return "unknown"
+
+
 def is_queue_header_row(cells: list[str]) -> bool:
     lowered = [cell.lower() for cell in cells[:5]]
     return lowered == ["id", "title", "status", "dependencies", "notes"]
@@ -1665,6 +1674,7 @@ def plan_status_command(plan_id: str) -> int:
         state = read_json(state_path)
         units, counts, warnings = parse_queue_units(paths["queue.md"])
         reviewer_report = parse_reviewer_report(paths["reviewer_report.md"])
+        review_gate = reviewer_gate_status(reviewer_report)
     except HermesError as exc:
         print(f"plan-status failed: {exc}", file=sys.stderr)
         return exc.exit_code
@@ -1675,6 +1685,7 @@ def plan_status_command(plan_id: str) -> int:
     print(f"created_at: {state.get('created_at', '')}")
     print(f"updated_at: {state.get('updated_at', '')}")
     print(f"plan_dir: {state.get('plan_dir', plan_dir)}")
+    print(f"review_gate: {review_gate}")
     print("reviewer_report:")
     print(f"- exists: {'yes' if reviewer_report.exists else 'no'}")
     print(f"- path: {paths['reviewer_report.md']}")
