@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 
-HERMES_VERSION = "0.2.0-b"
+HERMES_VERSION = "0.2.0-c"
 SCHEMA_VERSION = 1
 
 EXIT_SUCCESS = 0
@@ -171,6 +171,12 @@ class QueueUnit:
     notes: str
     line_number: int
     errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class BlockedQueueUnit:
+    unit: QueueUnit
+    reasons: list[str]
 
 
 def now_local() -> datetime:
@@ -925,6 +931,52 @@ def parse_queue_units(queue_path: Path) -> tuple[list[QueueUnit], dict[str, int]
     return units, counts, warnings
 
 
+def parse_unit_dependencies(raw_dependencies: str) -> list[str]:
+    stripped = raw_dependencies.strip()
+    if not stripped or stripped == "-":
+        return []
+    return [dependency.strip() for dependency in stripped.split(",") if dependency.strip()]
+
+
+def queue_units_by_id(units: list[QueueUnit]) -> dict[str, QueueUnit]:
+    by_id: dict[str, QueueUnit] = {}
+    for unit in units:
+        if unit.id and unit.id not in by_id:
+            by_id[unit.id] = unit
+    return by_id
+
+
+def dependency_block_reasons(unit: QueueUnit, units_by_id: dict[str, QueueUnit]) -> list[str]:
+    reasons: list[str] = []
+    for dependency_id in parse_unit_dependencies(unit.dependencies):
+        dependency = units_by_id.get(dependency_id)
+        if dependency is None:
+            reasons.append(f"dependency_missing:{dependency_id}")
+        elif dependency.status != "completed":
+            reasons.append(f"dependency_not_completed:{dependency_id}")
+    return reasons
+
+
+def select_next_runnable_unit(
+    units: list[QueueUnit],
+) -> tuple[QueueUnit | None, list[BlockedQueueUnit], dict[str, QueueUnit]]:
+    units_by_id = queue_units_by_id(units)
+    selected_unit: QueueUnit | None = None
+    blocked_units: list[BlockedQueueUnit] = []
+
+    for unit in units:
+        if unit.status != "pending":
+            continue
+        reasons = dependency_block_reasons(unit, units_by_id)
+        if reasons:
+            blocked_units.append(BlockedQueueUnit(unit=unit, reasons=reasons))
+            continue
+        if selected_unit is None:
+            selected_unit = unit
+
+    return selected_unit, blocked_units, units_by_id
+
+
 def initial_state(
     validation: dict[str, Any],
     *,
@@ -1543,6 +1595,68 @@ def plan_status_command(plan_id: str) -> int:
     return EXIT_SUCCESS
 
 
+def run_next_command(plan_id: str, *, dry_run: bool) -> int:
+    if not dry_run:
+        print("run-next failed: real execution is not implemented in v0.2-C; use --dry-run", file=sys.stderr)
+        return EXIT_VALIDATION
+
+    try:
+        paths = plan_paths(plan_id)
+        plan_dir = paths["plan_dir"]
+        state_path = paths["state.json"]
+        if not plan_dir.exists():
+            raise ValidationError(f"plan does not exist: {plan_id}")
+        if not state_path.exists():
+            raise ValidationError(f"plan state not found: {state_path}")
+        state = read_json(state_path)
+        units, _counts, warnings = parse_queue_units(paths["queue.md"])
+        selected_unit, blocked_units, units_by_id = select_next_runnable_unit(units)
+    except HermesError as exc:
+        print(f"run-next failed: {exc}", file=sys.stderr)
+        return exc.exit_code
+
+    completed_units = [
+        unit_id
+        for unit_id, unit in units_by_id.items()
+        if unit.status == "completed"
+    ]
+
+    print(f"plan_id: {state.get('plan_id', plan_id)}")
+    print("mode: dry-run")
+    if selected_unit is None:
+        print("selected_unit: none")
+    else:
+        print(f"selected_unit: {selected_unit.id}")
+    print("blocked_units:")
+    if blocked_units:
+        print("line\tid\treasons\ttitle")
+        for blocked in blocked_units:
+            print(
+                "\t".join(
+                    [
+                        str(blocked.unit.line_number),
+                        blocked.unit.id,
+                        ",".join(blocked.reasons),
+                        blocked.unit.title,
+                    ]
+                )
+            )
+    else:
+        print("(none)")
+    print("completed_dependency_map_summary:")
+    print(f"- completed_count: {len(completed_units)}")
+    if completed_units:
+        print(f"- completed_units: {', '.join(completed_units)}")
+    else:
+        print("- completed_units: none")
+    print(f"queue_parser_warnings: {len(warnings)}")
+    if warnings:
+        print("queue_parser_warnings_detail:")
+        for warning in warnings:
+            print(f"- {warning}")
+    return EXIT_SUCCESS
+
+
 def parse_older_than(value: str) -> timedelta:
     if len(value) < 2:
         raise ValidationError("--older-than must look like 7d, 12h, or 30m")
@@ -1736,6 +1850,10 @@ def build_parser() -> argparse.ArgumentParser:
     plan_status_parser = subparsers.add_parser("plan-status", help="show a local plan summary")
     plan_status_parser.add_argument("plan_id")
 
+    run_next_parser = subparsers.add_parser("run-next", help="select the next runnable plan unit")
+    run_next_parser.add_argument("plan_id")
+    run_next_parser.add_argument("--dry-run", action="store_true", help="select without executing a unit")
+
     cleanup_parser = subparsers.add_parser("cleanup", help="remove old Hermes-owned run dirs")
     cleanup_parser.add_argument("--dry-run", action="store_true", help="show what would be removed")
     cleanup_parser.add_argument("--older-than", required=True, help="age threshold such as 7d")
@@ -1772,6 +1890,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "plan-status":
         return plan_status_command(args.plan_id)
+    if args.command == "run-next":
+        return run_next_command(args.plan_id, dry_run=args.dry_run)
     if args.command == "cleanup":
         return cleanup_command(
             Path(args.runs_root),
