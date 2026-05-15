@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "plan_id": "example-plan",
+  "state": "awaiting_review",
+  "previous_state": "dry_run_ready",
+  "updated_at": "2026-05-15T11:30:00+09:00",
+  "updated_by": "operator",
+  "transition_reason": "dry-run evidence collected, queued for reviewer",
+  "review_gate_snapshot": "open",
+  "history": [
+    {
+      "from": null,
+      "to": "draft",
+      "at": "2026-05-15T10:00:00+09:00",
+      "by": "operator",
+      "reason": "initial scaffold"
+    },
+    {
+      "from": "draft",
+      "to": "queued",
+      "at": "2026-05-15T10:30:00+09:00",
+      "by": "operator",
+      "reason": "queue authored"
+    },
+    {
+      "from": "queued",
+      "to": "dry_run_ready",
+      "at": "2026-05-15T11:00:00+09:00",
+      "by": "operator",
+      "reason": "dry-run produced for unit-001"
+    },
+    {
+      "from": "dry_run_ready",
+      "to": "awaiting_review",
+      "at": "2026-05-15T11:30:00+09:00",
+      "by": "operator",
+      "reason": "submitted for reviewer"
+    }
+  ]
+}
