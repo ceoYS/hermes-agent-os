@@ -23,7 +23,8 @@ safe_remove_smoke_plan() {
           "$target/queue.md" \
           "$target/log.md" \
           "$target/state.json" \
-          "$target/morning_brief.md"
+          "$target/morning_brief.md" \
+          "$target/reviewer_report.md"
         rmdir -- "$target"
       fi
       ;;
@@ -67,6 +68,7 @@ main() {
   assert_file_exists "$SMOKE_PLAN_DIR/log.md"
   assert_file_exists "$SMOKE_PLAN_DIR/state.json"
   assert_file_exists "$SMOKE_PLAN_DIR/morning_brief.md"
+  assert_file_exists "$SMOKE_PLAN_DIR/reviewer_report.md"
   assert_contains "$SMOKE_PLAN_DIR/state.json" '"plan_id": "smoke-plan"'
 
   safe_remove_smoke_plan "$SMOKE_PLAN_DIR"

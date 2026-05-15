@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 
-HERMES_VERSION = "0.2.0-c"
+HERMES_VERSION = "0.2.0-d"
 SCHEMA_VERSION = 1
 
 EXIT_SUCCESS = 0
@@ -47,7 +47,22 @@ STATUSES = {
 }
 
 PLAN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-PLAN_FILES = ["plan.md", "queue.md", "log.md", "state.json", "morning_brief.md"]
+PLAN_FILES = [
+    "plan.md",
+    "queue.md",
+    "log.md",
+    "state.json",
+    "morning_brief.md",
+    "reviewer_report.md",
+]
+REVIEWER_VERDICTS = {
+    "pending",
+    "pass",
+    "pass_with_notes",
+    "needs_work",
+    "blocked",
+}
+REVIEWER_STOP_VERDICTS = {"needs_work", "blocked"}
 QUEUE_STATUSES = {
     "pending",
     "running",
@@ -177,6 +192,15 @@ class QueueUnit:
 class BlockedQueueUnit:
     unit: QueueUnit
     reasons: list[str]
+
+
+@dataclass
+class ReviewerReport:
+    exists: bool
+    verdict: str | None
+    status: str
+    stop_signal: bool
+    detail: str
 
 
 def now_local() -> datetime:
@@ -838,6 +862,88 @@ def render_morning_brief_md(*, title: str) -> str:
             "## Next Actions",
             "",
         ]
+    )
+
+
+def render_reviewer_report_md() -> str:
+    return "\n".join(
+        [
+            "# Reviewer Report",
+            "",
+            "verdict: pending",
+            "",
+            "Accepted verdicts:",
+            "- pending",
+            "- pass",
+            "- pass_with_notes",
+            "- needs_work",
+            "- blocked",
+            "",
+            "## Notes",
+            "",
+            "## Required Fixes",
+            "",
+        ]
+    )
+
+
+def parse_reviewer_report(report_path: Path) -> ReviewerReport:
+    if not report_path.exists():
+        return ReviewerReport(
+            exists=False,
+            verdict=None,
+            status="missing_report",
+            stop_signal=False,
+            detail="reviewer_report.md does not exist",
+        )
+
+    verdict: str | None = None
+    for line in read_text(report_path).splitlines():
+        match = re.fullmatch(r"\s*verdict\s*:\s*(.*?)\s*", line)
+        if match:
+            verdict = match.group(1).strip()
+            break
+
+    if not verdict:
+        return ReviewerReport(
+            exists=True,
+            verdict=None,
+            status="missing_verdict",
+            stop_signal=False,
+            detail="verdict field is missing or empty",
+        )
+
+    normalized = verdict.lower()
+    if normalized not in REVIEWER_VERDICTS:
+        return ReviewerReport(
+            exists=True,
+            verdict=verdict,
+            status="unknown_verdict",
+            stop_signal=False,
+            detail="unknown reviewer verdict",
+        )
+    if normalized in REVIEWER_STOP_VERDICTS:
+        return ReviewerReport(
+            exists=True,
+            verdict=normalized,
+            status="stop_signal",
+            stop_signal=True,
+            detail="plan should not proceed until reviewed and fixed",
+        )
+    if normalized == "pending":
+        return ReviewerReport(
+            exists=True,
+            verdict=normalized,
+            status="not_yet_reviewed",
+            stop_signal=False,
+            detail="review has not been completed",
+        )
+    return ReviewerReport(
+        exists=True,
+        verdict=normalized,
+        status="non_blocking",
+        stop_signal=False,
+        detail="reviewer verdict does not block the plan",
     )
 
 
@@ -1516,6 +1622,7 @@ def plan_init_command(plan_id: str, *, title: str, objective: str, force: bool) 
             "log": str(paths["log.md"]),
             "state": str(paths["state.json"]),
             "morning_brief": str(paths["morning_brief.md"]),
+            "reviewer_report": str(paths["reviewer_report.md"]),
         }
         state = {
             "schema_version": SCHEMA_VERSION,
@@ -1535,6 +1642,7 @@ def plan_init_command(plan_id: str, *, title: str, objective: str, force: bool) 
         write_text(paths["log.md"], f"# Plan Log\n\n- {created_at} created plan scaffold\n")
         write_json(paths["state.json"], state)
         write_text(paths["morning_brief.md"], render_morning_brief_md(title=title))
+        write_text(paths["reviewer_report.md"], render_reviewer_report_md())
     except HermesError as exc:
         print(f"plan-init failed: {exc}", file=sys.stderr)
         return exc.exit_code
@@ -1556,6 +1664,7 @@ def plan_status_command(plan_id: str) -> int:
             raise ValidationError(f"plan state not found: {state_path}")
         state = read_json(state_path)
         units, counts, warnings = parse_queue_units(paths["queue.md"])
+        reviewer_report = parse_reviewer_report(paths["reviewer_report.md"])
     except HermesError as exc:
         print(f"plan-status failed: {exc}", file=sys.stderr)
         return exc.exit_code
@@ -1566,6 +1675,13 @@ def plan_status_command(plan_id: str) -> int:
     print(f"created_at: {state.get('created_at', '')}")
     print(f"updated_at: {state.get('updated_at', '')}")
     print(f"plan_dir: {state.get('plan_dir', plan_dir)}")
+    print("reviewer_report:")
+    print(f"- exists: {'yes' if reviewer_report.exists else 'no'}")
+    print(f"- path: {paths['reviewer_report.md']}")
+    print(f"- verdict: {reviewer_report.verdict or 'missing'}")
+    print(f"- status: {reviewer_report.status}")
+    print(f"- stop_signal: {'yes' if reviewer_report.stop_signal else 'no'}")
+    print(f"- detail: {reviewer_report.detail}")
     print("queue_counts:")
     for status in QUEUE_COUNT_ORDER:
         print(f"- {status}: {counts.get(status, 0)}")
