@@ -9,6 +9,7 @@ Operator closure docs: see [docs/OPERATOR_CHECKLIST.md](docs/OPERATOR_CHECKLIST.
 and [docs/V0_3_ENTRY_CRITERIA.md](docs/V0_3_ENTRY_CRITERIA.md).
 
 Plan state machine design: see [docs/PLAN_STATE_MACHINE.md](docs/PLAN_STATE_MACHINE.md).
+Plan state record schema design: see [docs/PLAN_STATE_RECORD_SCHEMA.md](docs/PLAN_STATE_RECORD_SCHEMA.md).
 
 ## v0 Goal
 
