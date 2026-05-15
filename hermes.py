@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 
-HERMES_VERSION = "0.2.0-e"
+HERMES_VERSION = "0.2.0-f"
 SCHEMA_VERSION = 1
 
 EXIT_SUCCESS = 0
@@ -851,6 +851,28 @@ def render_queue_md() -> str:
     )
 
 
+def render_plan_log_md(*, created_at: str) -> str:
+    return "\n".join(
+        [
+            "# Plan Log",
+            "",
+            f"- {created_at} created plan scaffold",
+            "",
+            "## Manual Review Checkpoints",
+            "",
+            "Human reviewers can record major plan-level review decisions here as the plan progresses.",
+            "This section is a human-maintained audit log, not an automatic source of truth for Hermes decisions.",
+            "",
+            "Accepted verdicts: `pending`, `pass`, `pass_with_notes`, `needs_work`, `blocked`.",
+            "",
+            "| timestamp | reviewer | checkpoint | verdict | notes |",
+            "| --- | --- | --- | --- | --- |",
+            "| YYYY-MM-DDTHH:MM:SS+09:00 | reviewer-name | checkpoint name | pending | Notes or links |",
+            "",
+        ]
+    )
+
+
 def render_morning_brief_md(*, title: str) -> str:
     return "\n".join(
         [
@@ -1648,7 +1670,7 @@ def plan_init_command(plan_id: str, *, title: str, objective: str, force: bool) 
 
         write_text(paths["plan.md"], render_plan_md(title=title, objective=objective))
         write_text(paths["queue.md"], render_queue_md())
-        write_text(paths["log.md"], f"# Plan Log\n\n- {created_at} created plan scaffold\n")
+        write_text(paths["log.md"], render_plan_log_md(created_at=created_at))
         write_json(paths["state.json"], state)
         write_text(paths["morning_brief.md"], render_morning_brief_md(title=title))
         write_text(paths["reviewer_report.md"], render_reviewer_report_md())
