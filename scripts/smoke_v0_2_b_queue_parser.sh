@@ -23,7 +23,8 @@ safe_remove_smoke_plan() {
           "$target/queue.md" \
           "$target/log.md" \
           "$target/state.json" \
-          "$target/morning_brief.md"
+          "$target/morning_brief.md" \
+          "$target/reviewer_report.md"
         rmdir -- "$target"
       fi
       ;;

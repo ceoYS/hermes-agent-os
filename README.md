@@ -68,3 +68,18 @@ Smoke test:
 ```bash
 bash scripts/smoke_v0_2_c_run_next_dry_run.sh
 ```
+
+## v0.2-D Reviewer Report
+
+`plan-init` now creates a plan-level `.hermes/plans/<plan_id>/reviewer_report.md`.
+There is one reviewer report per plan for now, not per queue unit.
+
+`plan-status` reports whether the reviewer report exists and reads a simple `verdict:` field.
+Accepted verdicts are `pending`, `pass`, `pass_with_notes`, `needs_work`, and `blocked`.
+`needs_work` and `blocked` are reviewer stop signals: the plan should not proceed until reviewed and fixed.
+
+Smoke test:
+
+```bash
+bash scripts/smoke_v0_2_d_reviewer_report.sh
+```

@@ -59,6 +59,7 @@ Planned structure:
       log.md
       state.json
       morning_brief.md
+      reviewer_report.md
 
 Planned commands:
 - hermes submit
@@ -73,7 +74,12 @@ Safety:
 - no auto merge
 - no auto push
 - no auto deploy
-- stop on needs_work
+- stop on reviewer needs_work or blocked verdicts
+
+v0.2-D status:
+- plan-level reviewer_report.md scaffold added
+- plan-status surfaces reviewer verdicts and stop signals
+- per-unit review files are not implemented yet
 
 ## v0.3 — Planner / Builder / Reviewer Pipeline
 
