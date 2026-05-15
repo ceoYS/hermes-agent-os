@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "plan_id": "example-plan",
+  "state": "running",
+  "previous_state": "blocked_by_reviewer",
+  "updated_at": "2026-05-15T12:00:00+09:00",
+  "updated_by": "operator",
+  "transition_reason": "operator tried to run while reviewer still blocking",
+  "review_gate_snapshot": "blocked_by_reviewer",
+  "history": [
+    {
+      "from": "awaiting_review",
+      "to": "blocked_by_reviewer",
+      "at": "2026-05-15T11:45:00+09:00",
+      "by": "reviewer",
+      "reason": "reviewer requested changes"
+    }
+  ]
+}

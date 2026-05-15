@@ -221,3 +221,8 @@ Smoke test:
 ```bash
 bash scripts/smoke_v0_3_e_validate_state.sh
 ```
+
+For full usage, exit codes, review gate behavior, and example records, see
+[docs/VALIDATE_STATE_USAGE.md](docs/VALIDATE_STATE_USAGE.md). Example
+`state.json` files live under
+[docs/examples/state/](docs/examples/state/).

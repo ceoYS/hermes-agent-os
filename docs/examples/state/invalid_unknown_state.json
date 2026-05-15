@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "plan_id": "example-plan",
+  "state": "made_up_state",
+  "previous_state": "draft",
+  "updated_at": "2026-05-15T10:00:00+09:00",
+  "updated_by": "operator",
+  "transition_reason": "typo or unsupported state name",
+  "history": []
+}
