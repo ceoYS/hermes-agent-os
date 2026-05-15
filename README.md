@@ -83,3 +83,84 @@ Smoke test:
 ```bash
 bash scripts/smoke_v0_2_d_reviewer_report.sh
 ```
+
+## v0.2-E Reviewer Gate
+
+`plan-status` summarizes the plan-level reviewer verdict as `review_gate`.
+The reviewer verdict is recorded in `.hermes/plans/<plan_id>/reviewer_report.md`.
+
+Gate mapping:
+- `review_gate: blocked_by_reviewer` comes from `verdict: needs_work` or `verdict: blocked`
+- `review_gate: open` comes from `verdict: pending`, `verdict: pass`, or `verdict: pass_with_notes`
+- `review_gate: unknown` comes from a missing verdict or an unknown verdict value
+
+Hermes does not make an automatic merge, execution, or reviewer decision from this gate.
+It is a status summary for the human operator to inspect before deciding what to do next.
+
+Smoke test:
+
+```bash
+bash scripts/smoke_v0_2_e_review_gate.sh
+```
+
+## v0.2-F Manual Review Checkpoints
+
+`plan-init` also creates a plan-level `.hermes/plans/<plan_id>/log.md` with a
+`Manual Review Checkpoints` section.
+
+Use this section as a human-maintained audit log for major review decisions:
+- who reviewed the plan
+- which checkpoint was reviewed
+- what verdict was recorded
+- any notes or links needed for later audit
+
+The checkpoint table is not an automatic source of truth for Hermes decisions.
+`reviewer_report.md` remains the machine-readable place for the current reviewer verdict,
+and `plan-status` remains the command that displays the derived `review_gate`.
+
+Smoke test:
+
+```bash
+bash scripts/smoke_v0_2_f_review_checkpoint_log.sh
+```
+
+## v0.2-G Review Workflow
+
+A typical manual reviewer workflow is:
+
+```bash
+python3 hermes.py plan-init trader-d129-docs-only --title "Trader D129 docs-only review" --objective "Prepare a docs-only review plan"
+```
+
+Edit `.hermes/plans/trader-d129-docs-only/queue.md` so the planned units are explicit.
+Then inspect the next runnable unit without executing it:
+
+```bash
+python3 hermes.py run-next trader-d129-docs-only --dry-run
+```
+
+After a human or external reviewer checks the plan, record the current verdict in
+`.hermes/plans/trader-d129-docs-only/reviewer_report.md`:
+
+```markdown
+verdict: pass_with_notes
+```
+
+Check the gate summary:
+
+```bash
+python3 hermes.py plan-status trader-d129-docs-only
+```
+
+If `plan-status` shows `review_gate: blocked_by_reviewer`, the plan should not proceed
+until the `needs_work` or `blocked` verdict is resolved. If it shows `review_gate: open`,
+the reviewer verdict is non-blocking. If it shows `review_gate: unknown`, inspect
+`reviewer_report.md` for a missing or unsupported verdict.
+
+Finally, append a human-readable checkpoint row to
+`.hermes/plans/trader-d129-docs-only/log.md` under `Manual Review Checkpoints`.
+That checkpoint is for audit history only; it does not replace the current verdict in
+`reviewer_report.md`.
+
+Hermes v0.2 still has no automatic queue execution, automatic merge, automatic reviewer,
+model routing, or run-all behavior.
