@@ -8,6 +8,8 @@ closure state, tag mapping, and safety boundaries.
 Operator closure docs: see [docs/OPERATOR_CHECKLIST.md](docs/OPERATOR_CHECKLIST.md)
 and [docs/V0_3_ENTRY_CRITERIA.md](docs/V0_3_ENTRY_CRITERIA.md).
 
+Plan state machine design: see [docs/PLAN_STATE_MACHINE.md](docs/PLAN_STATE_MACHINE.md).
+
 ## v0 Goal
 
 Read one task.yaml, validate it, create an isolated Git worktree, build prompt.md, optionally run codex exec, capture logs, save git outputs, append journal.jsonl, and write state.json.
