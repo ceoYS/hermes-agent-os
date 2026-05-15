@@ -46,3 +46,25 @@ Smoke test:
 ```bash
 bash scripts/smoke_v0_2_b_queue_parser.sh
 ```
+
+## v0.2-C Run Next Dry Run
+
+Hermes can inspect a plan queue and report the first runnable pending unit without executing Codex or modifying plan files.
+
+```bash
+python3 hermes.py run-next trader-d129-docs-only --dry-run
+```
+
+`--dry-run` is required. Real queue unit execution is not implemented in v0.2-C.
+
+Selection rules:
+- candidate units must have status `pending`
+- dependencies may be `-`, empty, or comma-separated unit ids
+- a pending unit is runnable only when every dependency exists and has status `completed`
+- blocked pending units report `dependency_not_completed:<unit_id>` or `dependency_missing:<unit_id>`
+
+Smoke test:
+
+```bash
+bash scripts/smoke_v0_2_c_run_next_dry_run.sh
+```
