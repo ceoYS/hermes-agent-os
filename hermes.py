@@ -269,6 +269,14 @@ class ReviewerReport:
     detail: str
 
 
+@dataclass
+class StateValidationSummary:
+    verdict: str
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    record: dict[str, Any] | None = None
+
+
 def now_local() -> datetime:
     return datetime.now().astimezone()
 
@@ -1756,9 +1764,8 @@ def plan_status_command(plan_id: str) -> int:
         state_path = paths["state.json"]
         if not plan_dir.exists():
             raise ValidationError(f"plan does not exist: {plan_id}")
-        if not state_path.exists():
-            raise ValidationError(f"plan state not found: {state_path}")
-        state = read_json(state_path)
+        state_validation = summarize_state_validation(plan_dir.name, state_path)
+        state = state_validation.record or {}
         units, counts, warnings = parse_queue_units(paths["queue.md"])
         reviewer_report = parse_reviewer_report(paths["reviewer_report.md"])
         review_gate = reviewer_gate_status(reviewer_report)
@@ -1766,12 +1773,16 @@ def plan_status_command(plan_id: str) -> int:
         print(f"plan-status failed: {exc}", file=sys.stderr)
         return exc.exit_code
 
-    print(f"plan_id: {state.get('plan_id', '')}")
+    print(f"plan_id: {state.get('plan_id', plan_dir.name)}")
     print(f"title: {state.get('title', '')}")
-    print(f"status: {state.get('status', '')}")
+    print(f"status: {state.get('status', state.get('state', ''))}")
     print(f"created_at: {state.get('created_at', '')}")
     print(f"updated_at: {state.get('updated_at', '')}")
     print(f"plan_dir: {state.get('plan_dir', plan_dir)}")
+    print(f"state_validation: {state_validation.verdict}")
+    if state_validation.verdict != "not_found":
+        print(f"state_validation_errors: {len(state_validation.errors)}")
+        print(f"state_validation_warnings: {len(state_validation.warnings)}")
     print(f"review_gate: {review_gate}")
     print("reviewer_report:")
     print(f"- exists: {'yes' if reviewer_report.exists else 'no'}")
@@ -1827,6 +1838,24 @@ def _read_state_record(state_file: Path) -> tuple[dict[str, Any] | None, int, st
     if not isinstance(data, dict):
         return None, VALIDATE_STATE_EXIT_USAGE, f"state file root must be a JSON object: {state_file}"
     return data, VALIDATE_STATE_EXIT_PASS, ""
+
+
+def summarize_state_validation(plan_id: str, state_path: Path) -> StateValidationSummary:
+    if not state_path.exists():
+        return StateValidationSummary(verdict="not_found")
+
+    record, _status, message = _read_state_record(state_path)
+    if record is None:
+        return StateValidationSummary(verdict="error", errors=[f"error: {message}"])
+
+    errors, warnings = validate_plan_state_record(record, expected_plan_id=plan_id)
+    verdict = "pass" if not errors else "fail"
+    return StateValidationSummary(
+        verdict=verdict,
+        errors=errors,
+        warnings=warnings,
+        record=record,
+    )
 
 
 def validate_plan_state_record(
