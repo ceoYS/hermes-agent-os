@@ -12,6 +12,7 @@ Plan state machine design: see [docs/PLAN_STATE_MACHINE.md](docs/PLAN_STATE_MACH
 Plan state record schema design: see [docs/PLAN_STATE_RECORD_SCHEMA.md](docs/PLAN_STATE_RECORD_SCHEMA.md).
 State record validation rules: see [docs/STATE_RECORD_VALIDATION_RULES.md](docs/STATE_RECORD_VALIDATION_RULES.md).
 Minimal state validator plan: see [docs/MINIMAL_STATE_VALIDATOR_PLAN.md](docs/MINIMAL_STATE_VALIDATOR_PLAN.md).
+Validate-state integration boundary: see [docs/VALIDATE_STATE_INTEGRATION_BOUNDARY.md](docs/VALIDATE_STATE_INTEGRATION_BOUNDARY.md).
 
 ## v0 Goal
 
