@@ -5,8 +5,12 @@ Hermes v0 is a local single-task runner for safe Codex execution.
 Release ledger: see [RELEASES.md](RELEASES.md) for the v0.2-A through v0.2-G
 closure state, tag mapping, and safety boundaries.
 
+v0.3 release ledger: see [docs/RELEASE_LEDGER_V0_3.md](docs/RELEASE_LEDGER_V0_3.md).
+
 Operator closure docs: see [docs/OPERATOR_CHECKLIST.md](docs/OPERATOR_CHECKLIST.md)
 and [docs/V0_3_ENTRY_CRITERIA.md](docs/V0_3_ENTRY_CRITERIA.md).
+
+v0.4 entry criteria: see [docs/V0_4_ENTRY_CRITERIA.md](docs/V0_4_ENTRY_CRITERIA.md).
 
 Plan state machine design: see [docs/PLAN_STATE_MACHINE.md](docs/PLAN_STATE_MACHINE.md).
 Plan state record schema design: see [docs/PLAN_STATE_RECORD_SCHEMA.md](docs/PLAN_STATE_RECORD_SCHEMA.md).
