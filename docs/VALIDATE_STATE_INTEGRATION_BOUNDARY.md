@@ -7,6 +7,11 @@ v0.3-G is documentation only. It does not connect `validate-state` to
 `plan-status`, `run-next`, reviewer gates, operator checklists, state
 transitions, or any automatic enforcement path.
 
+v0.3-H implements Level 1 only: `plan-status` displays a read-only validation
+summary for `.hermes/plans/<plan_id>/state.json` when possible. It does not
+connect validation to `run-next`, reviewer gates, state transitions, or any
+automatic enforcement path.
+
 ## Purpose
 
 `validate-state` now gives operators a read-only way to inspect a single
@@ -23,13 +28,13 @@ points are evaluated:
 - reviewer signals and state validation must stay distinct unless a later
   milestone deliberately defines a combined policy
 
-Current v0.3-G behavior: documentation only. No implementation is added.
+Current v0.3-H behavior: Level 1 informational display only.
 
 ## Possible Future Integration Points
 
 ### Manual Operator Command
 
-The current command remains the only implemented integration level:
+The manual command remains available and keeps its own exit code semantics:
 
 ```bash
 python3 hermes.py validate-state <plan_id>
@@ -40,8 +45,9 @@ documented in [VALIDATE_STATE_USAGE.md](VALIDATE_STATE_USAGE.md).
 
 ### `plan-status` Informational Display
 
-A future `plan-status` integration could read `.hermes/plans/<plan_id>/state.json`
-when that file exists and display a validation summary, for example:
+The v0.3-H `plan-status` integration reads
+`.hermes/plans/<plan_id>/state.json` when that file exists and displays a
+validation summary, for example:
 
 ```text
 state_validation: pass
@@ -49,13 +55,13 @@ state_validation_errors: 0
 state_validation_warnings: 1
 ```
 
-If no state file exists, `plan-status` could show:
+If no state file exists, `plan-status` shows:
 
 ```text
 state_validation: not_found
 ```
 
-This candidate is informational only. It must not change `plan-status` exit
+This display is informational only. It must not change `plan-status` exit
 codes, queue parsing behavior, reviewer gate display, or `run-next` behavior.
 
 ### `run-next` Preflight Check
@@ -104,26 +110,25 @@ defines warning, override, and enforcement behavior.
 | Level 3 | `run-next` soft block with explicit override | `run-next` blocks by default only under a documented override policy. |
 | Level 4 | Hard enforcement | Hermes refuses unsafe transitions or execution without override. |
 
-Current implementation is close to Level 0. `validate-state` exists as a manual,
-read-only command, but Hermes does not automatically invoke it from other
-commands.
-
-v0.3-G does not implement Levels 1 through 4.
+Current implementation is Level 1. `validate-state` exists as a manual,
+read-only command, and `plan-status` displays the same validator result as a
+summary. Hermes does not invoke validation from `run-next` or use it for
+enforcement.
 
 ## Recommended Next Step
 
-The recommended next implementation candidate is Level 1:
+The implemented Level 1 boundary is:
 
-- update `plan-status` to display a read-only validation summary when
+- `plan-status` displays a read-only validation summary when
   `.hermes/plans/<plan_id>/state.json` exists
-- display `state_validation: not_found` or an equivalent summary when the file
+- `plan-status` displays `state_validation: not_found` when the file
   does not exist
-- keep `plan-status` exit code behavior unchanged
-- keep `run-next` behavior unchanged
-- avoid creating or modifying `state.json`
-- avoid treating validation output as execution approval
+- `plan-status` exit code behavior remains unchanged
+- `run-next` behavior remains unchanged
+- validation does not create or modify `state.json`
+- validation output is not treated as execution approval
 
-Level 1 is preferred because it makes validation operator-visible before Hermes
+Level 1 is useful because it makes validation operator-visible before Hermes
 starts using validation as a warning or block signal.
 
 ## What Must Not Happen Yet
@@ -158,9 +163,9 @@ Future integration should follow these principles:
 
 ## Future Decision Points
 
-Later milestones need explicit decisions before moving beyond Level 0:
+Later milestones need explicit decisions before moving beyond Level 1:
 
-- whether `plan-status` should display validation summary
+- whether `plan-status` summary needs machine-readable output
 - whether `run-next` should show validation warnings only
 - when `blocked_by_reviewer` should become a hard block
 - whether unknown `review_gate` should remain a warning or become a block

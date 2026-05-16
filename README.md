@@ -223,6 +223,29 @@ Smoke test:
 bash scripts/smoke_v0_3_e_validate_state.sh
 ```
 
+## v0.3-H `plan-status` State Validation Summary
+
+`plan-status <plan_id>` now shows a read-only validation summary for
+`.hermes/plans/<plan_id>/state.json`:
+
+```text
+state_validation: pass
+state_validation_errors: 0
+state_validation_warnings: 0
+```
+
+If the state file is missing, `plan-status` prints `state_validation: not_found`.
+Validation failures or JSON/read errors are displayed as `fail` or `error`, but
+`plan-status` still exits `0` when it can show the plan summary. The
+`validate-state` CLI keeps its own exit code contract: `0` pass, `1` validation
+fail, and `2` missing, unreadable, or invalid JSON input.
+
+Smoke test:
+
+```bash
+bash scripts/smoke_v0_3_h_plan_status_state_validation.sh
+```
+
 For full usage, exit codes, review gate behavior, and example records, see
 [docs/VALIDATE_STATE_USAGE.md](docs/VALIDATE_STATE_USAGE.md). Example
 `state.json` files live under
