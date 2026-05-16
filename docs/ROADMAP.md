@@ -104,6 +104,12 @@ Scope:
 - stop on critical failure
 - consolidated morning_brief.md
 
+v0.4-A status:
+- v0.4 scope narrowed to auditability, reproducibility, and operator-facing reporting
+- candidate round layout drafted in docs/V0_4_SCOPE_AND_AUDITABILITY_ROADMAP.md
+- v0.3 read-only boundary preserved
+- no enforcement, no automation, no run-next wiring
+
 ## v0.5 — Nous Hermes CLI-only POC
 
 Goal:
