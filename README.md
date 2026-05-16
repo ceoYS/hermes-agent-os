@@ -13,6 +13,7 @@ Plan state record schema design: see [docs/PLAN_STATE_RECORD_SCHEMA.md](docs/PLA
 State record validation rules: see [docs/STATE_RECORD_VALIDATION_RULES.md](docs/STATE_RECORD_VALIDATION_RULES.md).
 Minimal state validator plan: see [docs/MINIMAL_STATE_VALIDATOR_PLAN.md](docs/MINIMAL_STATE_VALIDATOR_PLAN.md).
 Validate-state integration boundary: see [docs/VALIDATE_STATE_INTEGRATION_BOUNDARY.md](docs/VALIDATE_STATE_INTEGRATION_BOUNDARY.md).
+Plan status state validation guide: see [docs/PLAN_STATUS_STATE_VALIDATION_GUIDE.md](docs/PLAN_STATUS_STATE_VALIDATION_GUIDE.md).
 
 ## v0 Goal
 
@@ -250,3 +251,6 @@ For full usage, exit codes, review gate behavior, and example records, see
 [docs/VALIDATE_STATE_USAGE.md](docs/VALIDATE_STATE_USAGE.md). Example
 `state.json` files live under
 [docs/examples/state/](docs/examples/state/).
+
+For operator interpretation of `plan-status` state validation summaries, see
+[docs/PLAN_STATUS_STATE_VALIDATION_GUIDE.md](docs/PLAN_STATUS_STATE_VALIDATION_GUIDE.md).
